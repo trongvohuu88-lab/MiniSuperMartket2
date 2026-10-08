@@ -1,27 +1,41 @@
 ﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
-using System.Text;
 using Microsoft.OpenApi.Models;
+using MiniSupermarket.API.Data;
+using System.Text;
 
+// 1. Khởi tạo WebApplicationBuilder ĐẦU TIÊN
 var builder = WebApplication.CreateBuilder(args);
 
+// 2. Lấy Connection String và JWT Secret từ Configuration
+var connectionString = builder.Configuration.GetConnectionString("DefaultConnection");
 var jwtSecret = builder.Configuration["JwtSettings:Secret"]
                 ?? "SupermarketSecretKeyDoAnMonHoc2026SecureString!!";
 
-builder.Services.AddAuthentication(options => {
+// 3. Đăng ký DbContext với SQL Server
+builder.Services.AddDbContext<SupermarketDbContext>(options =>
+    options.UseSqlServer(connectionString));
+
+// 4. Cấu hình JWT Authentication
+builder.Services.AddAuthentication(options =>
+{
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
     options.DefaultChallengeScheme = JwtBearerDefaults.AuthenticationScheme;
 })
-.AddJwtBearer(options => {
+.AddJwtBearer(options =>
+{
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuerSigningKey = true,
-        IssuerSigningKey = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(jwtSecret)),
+        IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(jwtSecret)),
         ValidateIssuer = false,
-        ValidateAudience = false
+        ValidateAudience = false,
+        ClockSkew = TimeSpan.Zero
     };
 });
 
+// 5. Cấu hình Swagger UI có hỗ trợ nút Authorize JWT
 builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc("v1", new OpenApiInfo { Title = "MiniSupermarket API", Version = "v1" });
@@ -32,23 +46,38 @@ builder.Services.AddSwaggerGen(options =>
         Scheme = "Bearer",
         BearerFormat = "JWT",
         In = ParameterLocation.Header,
-        Description = "Nhập: Bearer <token>"
+        Description = "Chỉ cần dán JWT Token vào ô bên dưới (không cần nhập chữ Bearer):"
     });
     options.AddSecurityRequirement(new OpenApiSecurityRequirement
     {
         {
-            new OpenApiSecurityScheme { Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" } },
+            new OpenApiSecurityScheme
+            {
+                Reference = new OpenApiReference { Type = ReferenceType.SecurityScheme, Id = "Bearer" }
+            },
             Array.Empty<string>()
         }
     });
 });
 
 builder.Services.AddControllers();
+
+// 6. Build ứng dụng
 var app = builder.Build();
 
-if (app.Environment.IsDevelopment()) { app.UseSwagger(); app.UseSwaggerUI(); }
+// 7. Cấu hình HTTP Request Pipeline (Middleware)
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
 app.UseHttpsRedirection();
-app.UseAuthentication(); // ⚠️ Đúng thứ tự
+
+// Thứ tự Middleware bắt buộc: Authentication TRƯỚC, Authorization SAU
+app.UseAuthentication();
 app.UseAuthorization();
+
 app.MapControllers();
+
 app.Run();

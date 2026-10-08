@@ -4,21 +4,33 @@ using System.Text.Json;
 
 namespace MiniSupermarket.WinForms
 {
+    // 1. Lưu phiên đăng nhập hiện tại
     public static class SessionManager
     {
-        public static string JwtToken { get; set; } = string.Empty;
+        public static string Token { get; set; } = string.Empty;
+        public static string CurrentUsername { get; set; } = string.Empty;
         public static string CurrentRole { get; set; } = string.Empty;
+        public static string? JwtToken { get; internal set; }
+
+        // Phương thức xóa thông tin phiên khi đăng xuất
+        public static void Clear()
+        {
+            Token = string.Empty;
+            CurrentUsername = string.Empty;
+            CurrentRole = string.Empty;
+        }
     }
 
+    // 2. Service gọi API tập trung
     public static class ApiClientService
     {
-        // ⚠️ Chỉnh cổng cho khớp với API của bạn (Kiểm tra trong Properties/launchSettings.json của API)
+        // ⚠️ Kiểm tra và chỉnh cổng localhost cho khớp với launchSettings.json của dự án API
         private static readonly HttpClient _client = new HttpClient
         {
             BaseAddress = new Uri("https://localhost:7292/api/")
         };
 
-        // Hàm gọi API đăng nhập lấy Token
+        // Hàm gọi API đăng nhập lấy Token và lưu vào SessionManager
         public static async Task<bool> LoginAsync(string username, string password)
         {
             var loginObj = new { Username = username, Password = password };
@@ -28,8 +40,12 @@ namespace MiniSupermarket.WinForms
             {
                 var jsonString = await response.Content.ReadAsStringAsync();
                 using var doc = JsonDocument.Parse(jsonString);
-                SessionManager.JwtToken = doc.RootElement.GetProperty("token").GetString() ?? string.Empty;
+
+                // Gán dữ liệu vào SessionManager
+                SessionManager.Token = doc.RootElement.GetProperty("token").GetString() ?? string.Empty;
                 SessionManager.CurrentRole = doc.RootElement.GetProperty("role").GetString() ?? string.Empty;
+                SessionManager.CurrentUsername = username;
+
                 return true;
             }
             return false;
@@ -38,7 +54,7 @@ namespace MiniSupermarket.WinForms
         // Hàm gọi API lấy dữ liệu có gắn kèm Bearer Token bảo mật
         public static async Task<string> GetDataWithTokenAsync(string endpoint)
         {
-            _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", SessionManager.JwtToken);
+            _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", SessionManager.Token);
             var response = await _client.GetAsync(endpoint);
 
             if (response.IsSuccessStatusCode)
@@ -47,7 +63,7 @@ namespace MiniSupermarket.WinForms
             }
             else if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
             {
-                throw new Exception("Phiên làm việc hết hạn hoặc chưa đăng nhập!");
+                throw new Exception("Phiên làm việc hết hạn hoặc không có quyền truy cập!");
             }
             throw new Exception("Lỗi khi gọi dữ liệu từ Server.");
         }
